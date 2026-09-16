@@ -72,10 +72,11 @@ func (handler *Handler) Detail(responseWriter http.ResponseWriter, request *http
 		handler.internalError(responseWriter, request, err)
 		return
 	}
-	if !found {
-		handler.orderNotFound(responseWriter)
+	if !found || order.UserID != current.User.ID {
+		handler.errorPage(responseWriter, http.StatusNotFound, "", "404 Order Not Found")
 		return
 	}
+
 	orderItems, err := handler.orderStore.ListItems(request.Context(), order.ID)
 	if err != nil {
 		handler.internalError(responseWriter, request, err)
