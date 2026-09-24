@@ -9,6 +9,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -64,6 +65,44 @@ func noSniff(next http.Handler) http.Handler {
 		responseWriter.Header().Set("X-Content-Type-Options", "nosniff")
 		next.ServeHTTP(responseWriter, request)
 	})
+}
+
+func validateRequestOrigin(origin string, renderer *templates.Renderer) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+			if request.Method != "POST" {
+				next.ServeHTTP(responseWriter, request)
+				return
+			}
+			orgn := request.Header.Get("Origin")
+			if orgn != "" {
+				if orgn == origin {
+					next.ServeHTTP(responseWriter, request)
+					return
+				} else {
+					httpx.RespondWithErrorPage(responseWriter, renderer, http.StatusForbidden, "invalid origin", "")
+					return
+				}
+			} else {
+				parsedURL, err := url.Parse(request.Header.Get("Referer"))
+				if err != nil {
+					httpx.RespondWithErrorPage(responseWriter, renderer, http.StatusForbidden, "Error parsing URL", fmt.Sprint(err))
+					return
+				}
+				if parsedURL.Scheme == "" || parsedURL.Host == "" {
+					httpx.RespondWithErrorPage(responseWriter, renderer, http.StatusForbidden, "invalid url", "")
+					return
+				}
+				strungURL := parsedURL.Scheme + "://" + parsedURL.Host
+				if strungURL != origin {
+					httpx.RespondWithErrorPage(responseWriter, renderer, http.StatusForbidden, "invalid url", "")
+					return
+				}
+				next.ServeHTTP(responseWriter, request)
+				return
+			}
+		})
+	}
 }
 
 func recoverPanics(logger *logging.Logger, renderer *templates.Renderer) middleware {

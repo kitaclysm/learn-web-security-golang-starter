@@ -216,6 +216,7 @@ func New(database *sql.DB, logger *logging.Logger, options Options) (*Applicatio
 	})
 
 	dynamicHandler := permissiveCORS(dynamicMux)
+	validateHandler := validateRequestOrigin(options.AppOrigin, renderer)
 
 	mainMux := http.NewServeMux()
 	mainMux.HandleFunc("GET /health", func(responseWriter http.ResponseWriter, _ *http.Request) {
@@ -231,7 +232,7 @@ func New(database *sql.DB, logger *logging.Logger, options Options) (*Applicatio
 	mainMux.Handle("GET /shipping-widget.js", staticHandler)
 	mainMux.Handle("GET /product-photos/{filename}", staticHandler)
 	mainMux.HandleFunc("POST /integrations/pawpal/webhook", pawPalHandler.Webhook)
-	mainMux.Handle("/", dynamicHandler)
+	mainMux.Handle("/", validateHandler(dynamicHandler))
 
 	handler := applyMiddleware(
 		mainMux,
