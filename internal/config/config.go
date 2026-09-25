@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 const (
@@ -36,13 +38,14 @@ type Config struct {
 	MaxPublicProductResults    int
 	ActiveEncryptionKeyVersion string
 	EncryptionKeys             map[string][32]byte
+	DownloadSigningKey         [32]byte
 }
 
 type AttackerLabConfig struct {
 	Port int
 }
 
-func requireEnvVariable(environment map[string]string, name string) (string, error) {
+func requireEnvironmentVariable(environment map[string]string, name string) (string, error) {
 	value := environment[name]
 	if value == "" {
 		return "", fmt.Errorf("missing required environment variable: %s", name)
@@ -51,15 +54,23 @@ func requireEnvVariable(environment map[string]string, name string) (string, err
 }
 
 func Load(workingDirectory string) (Config, error) {
-	return Parse(processEnvironment(), workingDirectory)
+	env, err := processEnvironment(filepath.Join(workingDirectory, ".env"))
+	if err != nil {
+		return Config{}, err
+	}
+	return Parse(env, workingDirectory)
 }
 
 func LoadAttackerLab(workingDirectory string) (AttackerLabConfig, error) {
-	return ParseAttackerLab(processEnvironment())
+	env, err := processEnvironment(filepath.Join(workingDirectory, ".env"))
+	if err != nil {
+		return AttackerLabConfig{}, err
+	}
+	return ParseAttackerLab(env)
 }
 
 func Parse(environment map[string]string, workingDirectory string) (Config, error) {
-	apikey, err := requireEnvVariable(environment, "PAWPAL_API_KEY")
+	apikey, err := requireEnvironmentVariable(environment, "PAWPAL_API_KEY")
 	if err != nil {
 		return Config{}, err
 	}
@@ -91,6 +102,15 @@ func Parse(environment map[string]string, workingDirectory string) (Config, erro
 		databasePath = filepath.Join(workingDirectory, "data", defaultDatabaseFilename)
 	}
 
+	dsKey, err := requireEnvironmentVariable(environment, "DOWNLOAD_SIGNING_KEY")
+	if err != nil {
+		return Config{}, err
+	}
+	downloadSigningKey, err := parseEncryptionKey(dsKey, "DOWNLOAD_SIGNING_KEY")
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		PawPalAPIKey:               apikey,
 		AppOrigin:                  appOrigin,
@@ -102,6 +122,7 @@ func Parse(environment map[string]string, workingDirectory string) (Config, erro
 		MaxPublicProductResults:    MaxPublicProductResults,
 		ActiveEncryptionKeyVersion: activeEncryptionKeyVersion,
 		EncryptionKeys:             encryptionKeys,
+		DownloadSigningKey:         downloadSigningKey,
 	}, nil
 }
 
@@ -116,15 +137,23 @@ func ParseAttackerLab(environment map[string]string) (AttackerLabConfig, error) 
 	return AttackerLabConfig{Port: port}, nil
 }
 
-func processEnvironment() map[string]string {
-	environment := make(map[string]string)
+func processEnvironment(path string) (map[string]string, error) {
+	environment, err := godotenv.Read(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, err
+		}
+	}
+	if environment == nil {
+		environment = make(map[string]string)
+	}
 	for _, entry := range os.Environ() {
 		name, value, found := strings.Cut(entry, "=")
 		if found {
 			environment[name] = value
 		}
 	}
-	return environment
+	return environment, nil
 }
 
 func valueOrDefault(environment map[string]string, name, fallback string) string {
