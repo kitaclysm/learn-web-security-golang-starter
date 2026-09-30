@@ -95,6 +95,18 @@ func (handler *authHandler) Login(responseWriter http.ResponseWriter, request *h
 		return
 	}
 
+	if passwords.NeedsRehash(user.PasswordHash) {
+		passwordHash, err := passwords.Hash(password)
+		if err != nil {
+			handler.internalError(responseWriter, request, err)
+			return
+		}
+		if err := handler.accounts.UpdatePasswordHash(request.Context(), user.ID, passwordHash); err != nil {
+			handler.internalError(responseWriter, request, err)
+			return
+		}
+	}
+
 	challengeToken := totpLoginChallengeToken(request)
 	if err := handler.mfa.DeleteChallenge(request.Context(), challengeToken); err != nil {
 		handler.internalError(responseWriter, request, err)
@@ -234,22 +246,21 @@ func parseForm(_ int64, renderer *templates.Renderer) middleware {
 }
 
 func (handler *authHandler) Logout(responseWriter http.ResponseWriter, request *http.Request) {
-	challengeToken := totpLoginChallengeToken(request)
-	if err := handler.mfa.DeleteChallenge(request.Context(), challengeToken); err != nil {
-		handler.internalError(responseWriter, request, err)
-		return
-	}
-	sesh, current, err := sessions.Current(request, handler.accounts)
+	current, found, err := sessions.Current(request, handler.accounts)
 	if err != nil {
 		handler.internalError(responseWriter, request, err)
 		return
 	}
-	if current {
-		err = handler.accounts.RevokeSession(request.Context(), sesh.Session.Token)
-		if err != nil {
+	if found {
+		if err := handler.accounts.RevokeSession(request.Context(), current.Session.Token); err != nil {
 			handler.internalError(responseWriter, request, err)
 			return
 		}
+	}
+	challengeToken := totpLoginChallengeToken(request)
+	if err := handler.mfa.DeleteChallenge(request.Context(), challengeToken); err != nil {
+		handler.internalError(responseWriter, request, err)
+		return
 	}
 	sessions.ClearCookie(responseWriter)
 	if challengeToken != "" {

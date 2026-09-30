@@ -11,11 +11,12 @@ import (
 )
 
 const (
-	MaxLength  = 128
-	MemoryKiB  = 19 * 1024
-	Iterations = 2
-	Lanes      = 1 //parallelism
-	KeyLength  = 32
+	MaxLength   = 128
+	memoryKiB   = 19 * 1024
+	iterations  = 2
+	parallelism = 1 //lanes
+	saltLength  = 16
+	keyLength   = 32
 )
 
 func Hash(password string) (string, error) {
@@ -27,13 +28,13 @@ func Hash(password string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	derivedKey := argon2.IDKey([]byte(password), salt, Iterations, MemoryKiB, Lanes, KeyLength)
+	derivedKey := argon2.IDKey([]byte(password), salt, iterations, memoryKiB, parallelism, keyLength)
 
 	return encodeArgon2idHash(argon2idHash{
 		version:     argon2.Version,
-		memoryKiB:   MemoryKiB,
-		iterations:  Iterations,
-		parallelism: Lanes,
+		memoryKiB:   memoryKiB,
+		iterations:  iterations,
+		parallelism: parallelism,
 		salt:        salt,
 		derivedKey:  derivedKey,
 	}), nil
@@ -47,14 +48,19 @@ func Verify(password, encodedHash string) bool {
 		candidateHash := sha256.Sum256([]byte(password))
 		return subtle.ConstantTimeCompare(candidateHash[:], expectedHash) == 1
 	}
+
 	a2idHash, ok := parseArgon2idHash(encodedHash)
-	if !ok {
+	if !ok || a2idHash.version != argon2.Version {
 		return false
 	}
-	if a2idHash.version != argon2.Version {
-		return false
-	}
-	derivedKey := argon2.IDKey([]byte(password), a2idHash.salt, a2idHash.iterations, a2idHash.memoryKiB, a2idHash.parallelism, uint32(len(a2idHash.derivedKey)))
+	derivedKey := argon2.IDKey(
+		[]byte(password),
+		a2idHash.salt,
+		a2idHash.iterations,
+		a2idHash.memoryKiB,
+		a2idHash.parallelism,
+		uint32(len(a2idHash.derivedKey)),
+	)
 	return subtle.ConstantTimeCompare(derivedKey, a2idHash.derivedKey) == 1
 }
 
@@ -63,12 +69,13 @@ func NeedsRehash(encodedHash string) bool {
 		return true
 	}
 	a2idHash, ok := parseArgon2idHash(encodedHash)
-	if ok {
-		return !(a2idHash.version == argon2.Version &&
-			a2idHash.memoryKiB == MemoryKiB &&
-			a2idHash.iterations == Iterations &&
-			a2idHash.parallelism == Lanes &&
-			len(a2idHash.derivedKey) == KeyLength)
+	if !ok {
+		return false
+
 	}
-	return false
+	return !(a2idHash.version == argon2.Version &&
+		a2idHash.memoryKiB == memoryKiB &&
+		a2idHash.iterations == iterations &&
+		a2idHash.parallelism == parallelism &&
+		len(a2idHash.derivedKey) == keyLength)
 }

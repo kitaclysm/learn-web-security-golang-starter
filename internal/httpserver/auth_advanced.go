@@ -241,6 +241,17 @@ func (handler *authHandler) RecoverMFA(responseWriter http.ResponseWriter, reque
 		}
 		return
 	}
+	if passwords.NeedsRehash(user.PasswordHash) {
+		passwordHash, err := passwords.Hash(password)
+		if err != nil {
+			handler.internalError(responseWriter, request, err)
+			return
+		}
+		if err := handler.accounts.UpdatePasswordHash(request.Context(), user.ID, passwordHash); err != nil {
+			handler.internalError(responseWriter, request, err)
+			return
+		}
+	}
 	challengeToken := totpLoginChallengeToken(request)
 	if err := handler.mfa.DeleteChallenge(request.Context(), challengeToken); err != nil {
 		handler.internalError(responseWriter, request, err)
@@ -286,20 +297,14 @@ func (handler *authHandler) RequestPasswordReset(responseWriter http.ResponseWri
 		return
 	}
 	if !found {
-		if err := handler.renderPasswordResetRequest(
-			responseWriter,
-			http.StatusOK,
-			true,
-			"",
-			"",
-		); err != nil {
-			handler.internalError(responseWriter, request, err)
-		}
 		handler.logAuthenticationEvent(request, "password_reset_request", map[string]any{
 			"email":         email,
 			"success":       false,
 			"failureReason": "email not found",
 		})
+		if err := handler.renderPasswordResetRequest(responseWriter, http.StatusOK, true, "", ""); err != nil {
+			handler.internalError(responseWriter, request, err)
+		}
 		return
 	}
 	resetToken, err := handler.passwordResets.Create(request.Context(), user.ID)
